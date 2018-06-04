@@ -13,44 +13,71 @@ import (
 
 var profile = flag.Bool("profile", false, "add this flag to cause a .pprof file to be produced (suppresses logging)")
 var verbose = flag.Bool("verbose", false, "show locks and unlocks")
-var strategy = flag.String("strategy", "plock", "which strategy to use, plock-sleep, plock-gosched, or mutex")
-
-func Log(s string, args ...interface{}) {
-	if !(*profile) {
-		if len(args) == 0 {
-			fmt.Println(s)
-		} else {
-			fmt.Printf(s, args...)
-		}
-	}
-}
-
-func VerboseLog(s string, args ...interface{}) {
-	if *verbose {
-		Log(s, args...)
-	}
-}
+var strategy = flag.String("strategy", "plock", "which strategy to use, plock-sleep, queued-plock-sleep, plock-gosched, or mutex")
 
 const N_LOCKERS = 100
 const N_PLOCKERS = 2
 
-type TestFunc func(
+type PLock interface {
+	Lock()
+	Unlock()
+	PLock()
+	PUnlock()
+}
+
+func locker(
+	pl PLock,
 	stopFlag *atomic.Uint32,
-	lockCounter *atomic.Uint32,
-	plockCounter *atomic.Uint32)
+	wg *sync.WaitGroup,
+	lockCounter *atomic.Uint32) {
+
+	for stopFlag.Load() == 0 {
+		pl.Lock()
+		lockCounter.Inc()
+		VerboseLog("lock ACQUIRED")
+		time.Sleep(10 * time.Millisecond)
+		VerboseLog("lock RELEASING")
+		pl.Unlock()
+	}
+	wg.Done()
+}
+
+func plocker(
+	pl PLock,
+	stopFlag *atomic.Uint32,
+	wg *sync.WaitGroup,
+	plockCounter *atomic.Uint32) {
+
+	id := IDGEN()
+
+	for stopFlag.Load() == 0 {
+		time.Sleep(50 * time.Millisecond)
+		VerboseLog("p[%d] waiting\n", id)
+		pl.PLock()
+		plockCounter.Inc()
+		VerboseLog("p[%d] lock ACQUIRED\n", id)
+		time.Sleep(10 * time.Millisecond)
+		VerboseLog("p[%d] lock RELEASING\n", id)
+		pl.PUnlock()
+	}
+	wg.Done()
+}
 
 func main() {
 
 	flag.Parse()
 
-	var TestF TestFunc
-	if *strategy == "plock-sleep" {
-		TestF = DoSleepTest
-	} else if *strategy == "plock-gosched" {
-		TestF = DoGoschedTest
-	} else if *strategy == "mutex" {
-		TestF = DoRWMutexTest
-	} else {
+	var PL PLock
+	switch *strategy {
+	case "queued-plock-sleep":
+		PL = &QueuedSleepPriorityLock{}
+	case "plock-sleep":
+		PL = &SleepPriorityLock{}
+	case "plock-gosched":
+		PL = &GoschedPriorityLock{}
+	case "mutex":
+		PL = &MutexPriorityLock{}
+	default:
 		fmt.Println("strategy must be either mutex or plock")
 		flag.Usage()
 		os.Exit(1)
@@ -67,16 +94,22 @@ func main() {
 	var lockCounter atomic.Uint32
 	var plockCounter atomic.Uint32
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		TestF(&stopFlag, &lockCounter, &plockCounter)
-		Log("%d locks,\t%d plocks\t(%.3f %% plock)\n",
-			lockCounter.Load(), plockCounter.Load(),
-			float32(plockCounter.Load())/
-				float32(plockCounter.Load()+lockCounter.Load()))
-		wg.Done()
-	}()
+	// spawn lockers and plockers
+	for i := 0; i < N_LOCKERS; i++ {
+		wg.Add(1)
+		go locker(PL, &stopFlag, &wg, &lockCounter)
+	}
+	for i := 0; i < N_PLOCKERS; i++ {
+		wg.Add(1)
+		go plocker(PL, &stopFlag, &wg, &plockCounter)
+	}
+
 	time.Sleep(10 * time.Second)
 	stopFlag.Store(1)
 	wg.Wait()
+
+	fmt.Printf("%d locks,\t%d plocks\t(%.3f %% plock)\n",
+		lockCounter.Load(), plockCounter.Load(),
+		float32(plockCounter.Load())/
+			float32(plockCounter.Load()+lockCounter.Load()))
 }
