@@ -47,7 +47,7 @@ func (qspl *QueuedSleepPriorityLock) Lock() {
 func (qspl *QueuedSleepPriorityLock) Unlock() {
 	VerboseLog("QPLock UNLOCK")
 	if !qspl.lock.CAS(LOCKED, OPEN) {
-		panic("Tried to unlock locked/priority-reserved QPLock, this " +
+		panic("Tried to unlock non-locked/priority-reserved QPLock, this " +
 			"represents a logic error in your program")
 	}
 	qspl.dequeueTicket.Inc()
