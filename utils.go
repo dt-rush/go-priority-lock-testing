@@ -2,32 +2,62 @@ package main
 
 import (
 	"fmt"
-	"go.uber.org/atomic"
+	"github.com/fatih/color"
+	"sort"
+	"sync"
+	"time"
 )
 
-func Log(s string, args ...interface{}) {
-	if !(*profile) {
-		if len(args) == 0 {
-			fmt.Println(s)
-		} else {
-			fmt.Printf(s, args...)
+// OrderedLogger is used to print log messages in the order they
+// were actually created, to make sure that things seem sensible when
+// reading the test ouput
+type OrderedLogger struct {
+	logMutex sync.Mutex
+	logLines []LogLine
+	lastDump time.Time
+}
+
+type LogLine struct {
+	t int64
+	s string
+}
+
+var logger = &OrderedLogger{lastDump: time.Now()}
+
+func (l *OrderedLogger) sortLineBuffer() {
+	sort.Slice(l.logLines, func(i int, j int) bool {
+		return l.logLines[i].t < l.logLines[j].t
+	})
+}
+
+func (l *OrderedLogger) Log(line LogLine) {
+	if !*silent {
+		l.logMutex.Lock()
+		defer l.logMutex.Unlock()
+		l.logLines = append(l.logLines, line)
+
+		if len(l.logLines) > 10 {
+			l.sortLineBuffer()
+			for i := 0; i < 5; i++ {
+				line, l.logLines = l.logLines[0], l.logLines[1:]
+				fmt.Println(line.s)
+			}
+			l.lastDump = time.Now()
 		}
 	}
 }
 
-func VerboseLog(s string, args ...interface{}) {
-	if *verbose {
-		Log(s, args...)
+func (l *OrderedLogger) Flush() {
+	for _, line := range l.logLines {
+		l.sortLineBuffer()
+		fmt.Println(line.s)
 	}
 }
 
-type IDGenerator struct {
-	x atomic.Uint32
+func Log(t int64, s string, args ...interface{}) {
+	logger.Log(LogLine{t, fmt.Sprintf(s, args...)})
 }
 
-func (g *IDGenerator) Gen() int {
-	return int(g.x.Inc())
-}
-
-var IDGEN_OBJ = IDGenerator{}
-var IDGEN = IDGEN_OBJ.Gen
+var rlock = color.New(color.FgCyan).SprintFunc()
+var lock = color.New(color.FgRed).SprintFunc()
+var plock = color.New(color.FgBlue).SprintFunc()

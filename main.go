@@ -12,7 +12,7 @@ import (
 )
 
 var profile = flag.Bool("profile", false, "add this flag to cause a .pprof file to be produced (suppresses logging)")
-var verbose = flag.Bool("verbose", false, "show locks and unlocks")
+var silent = flag.Bool("silent", false, "silence locks and unlock output")
 var strategy = flag.String("strategy", "plock", "which strategy to use, plock-sleep, queued-plock-sleep, plock-gosched, or mutex")
 
 const N_LOCKERS = 100
@@ -34,9 +34,9 @@ func locker(
 	for stopFlag.Load() == 0 {
 		pl.Lock()
 		lockCounter.Inc()
-		VerboseLog("lock ACQUIRED")
+		Log(time.Now().UnixNano(), "lock ACQUIRED")
 		time.Sleep(10 * time.Millisecond)
-		VerboseLog("lock RELEASING")
+		Log(time.Now().UnixNano(), "lock RELEASING")
 		pl.Unlock()
 	}
 	wg.Done()
@@ -52,12 +52,12 @@ func plocker(
 
 	for stopFlag.Load() == 0 {
 		time.Sleep(50 * time.Millisecond)
-		VerboseLog("p[%d] waiting\n", id)
+		Log(time.Now().UnixNano(), "p[%d] waiting", id)
 		pl.PLock()
 		plockCounter.Inc()
-		VerboseLog("p[%d] lock ACQUIRED\n", id)
+		Log(time.Now().UnixNano(), "p[%d] lock ACQUIRED", id)
 		time.Sleep(10 * time.Millisecond)
-		VerboseLog("p[%d] lock RELEASING\n", id)
+		Log(time.Now().UnixNano(), "p[%d] lock RELEASING", id)
 		pl.PUnlock()
 	}
 	wg.Done()
@@ -108,7 +108,7 @@ func main() {
 	stopFlag.Store(1)
 	wg.Wait()
 
-	fmt.Printf("%d locks,\t%d plocks\t(%.3f %% plock)\n",
+	fmt.Printf("%d locks,\t%d plocks\t(%.3f %% plock)",
 		lockCounter.Load(), plockCounter.Load(),
 		float32(plockCounter.Load())/
 			float32(plockCounter.Load()+lockCounter.Load()))

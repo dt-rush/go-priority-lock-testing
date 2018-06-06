@@ -21,20 +21,20 @@ func (qspl *QueuedSleepPriorityLock) Lock() {
 		for qspl.dequeueTicket.Load() != queueTicket-1 {
 			time.Sleep(time.Millisecond)
 		}
-		VerboseLog("queueTicket %d at front\n", queueTicket)
+		Log(time.Now().UnixNano(), "queueTicket %d at front", queueTicket)
 		// try to grab lock from OPEN to LOCKED
 		for !qspl.lock.CAS(OPEN, LOCKED) {
 			time.Sleep(time.Millisecond)
 		}
-		VerboseLog("queueTicket %d set QPLock -> LOCKED\n", queueTicket)
+		Log(time.Now().UnixNano(), "queueTicket %d set QPLock -> LOCKED", queueTicket)
 		// if, once locked, we find a priority locker waiting, set
 		// to PRIORITY_RESERVED and continue AKA wait again
 		// for CAS(OPEN -> LOCKED) (since nothing can come to front of queue
 		// til this locker is unlocked, and if the user doesn't have logic
 		// errors, that can't happen while we're still waiting to leave here
 		if qspl.pWaiting.Load() > 0 {
-			VerboseLog("queueTicket %d locked but saw priority wait. Setting "+
-				"QPLock -> PRIORITY_RESERVED\n", queueTicket)
+			Log(time.Now().UnixNano(), "queueTicket %d locked but saw priority wait. Setting "+
+				"QPLock -> PRIORITY_RESERVED", queueTicket)
 			qspl.lock.Store(PRIORITY_RESERVED)
 			continue
 		} else {
@@ -45,7 +45,7 @@ func (qspl *QueuedSleepPriorityLock) Lock() {
 }
 
 func (qspl *QueuedSleepPriorityLock) Unlock() {
-	VerboseLog("QPLock UNLOCK")
+	Log(time.Now().UnixNano(), "QPLock UNLOCK")
 	if !qspl.lock.CAS(LOCKED, OPEN) {
 		panic("Tried to unlock non-locked/priority-reserved QPLock, this " +
 			"represents a logic error in your program")
@@ -54,7 +54,7 @@ func (qspl *QueuedSleepPriorityLock) Unlock() {
 }
 
 func (qspl *QueuedSleepPriorityLock) PUnlock() {
-	VerboseLog("QPLock PUNLOCK")
+	Log(time.Now().UnixNano(), "QPLock PUNLOCK")
 	qspl.lock.Store(OPEN)
 }
 
@@ -63,11 +63,11 @@ func (qspl *QueuedSleepPriorityLock) PUnlock() {
 // finally decrement pwaiting
 func (qspl *QueuedSleepPriorityLock) PLock() {
 	qspl.pWaiting.Inc()
-	VerboseLog("PLock() waiting...")
+	Log(time.Now().UnixNano(), "PLock() waiting...")
 	for !(qspl.lock.CAS(OPEN, LOCKED) ||
 		qspl.lock.CAS(PRIORITY_RESERVED, LOCKED)) {
 		time.Sleep(time.Millisecond)
 	}
-	VerboseLog("PLock() set QPLock -> LOCKED...")
+	Log(time.Now().UnixNano(), "PLock() set QPLock -> LOCKED...")
 	qspl.pWaiting.Dec()
 }
